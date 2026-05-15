@@ -11,7 +11,7 @@ const User = require('../models/User');
 const CaregiverPatientLink = require('../models/CaregiverPatientLink');
 const { notifyReminder, notifyMissedDose } = require('../notifications/notificationService');
 const { sendReminderSMS, sendMissedDoseAlertSMS, sendMissedDoseSMS } = require('./smsService');
-const { startOfDay, endOfDay, format, subMinutes, addMinutes } = require('date-fns');
+const { startOfDay, endOfDay } = require('date-fns');
 
 /**
  * Get all active medicines whose reminder time matches NOW (within ±2 min window).
@@ -19,7 +19,8 @@ const { startOfDay, endOfDay, format, subMinutes, addMinutes } = require('date-f
  */
 const getUpcomingReminders = async () => {
   const now = new Date();
-  const currentTime = format(now, 'HH:mm');
+  const currentHour   = now.getHours();
+  const currentMinute = now.getMinutes();
 
   // Get all active medicines with reminders enabled
   const medicines = await Medicine.find({
@@ -33,24 +34,29 @@ const getUpcomingReminders = async () => {
 
   for (const medicine of medicines) {
     for (const scheduledTime of medicine.timing) {
-      // Check if current time matches the scheduled time (exact HH:mm match)
-      if (scheduledTime === currentTime) {
-        // Check if we already fired this reminder today
-        const alreadyLogged = await AdherenceLog.findOne({
-          medicineId: medicine._id,
-          scheduledDate: startOfDay(now),
-          scheduledTime,
-        });
+      const [schedHour, schedMin] = scheduledTime.split(':').map(Number);
 
-        if (!alreadyLogged) {
-          due.push({ medicine, scheduledTime });
-        }
+      // ±1 minute window — handles cron jitter gracefully
+      // Positive means current time is AFTER scheduled time
+      const diffMin = (currentHour - schedHour) * 60 + (currentMinute - schedMin);
+      if (diffMin < 0 || diffMin > 1) continue;
+
+      // Check if we already fired this reminder today
+      const alreadyLogged = await AdherenceLog.findOne({
+        medicineId: medicine._id,
+        scheduledDate: startOfDay(now),
+        scheduledTime,
+      });
+
+      if (!alreadyLogged) {
+        due.push({ medicine, scheduledTime });
       }
     }
   }
 
   return due;
 };
+
 
 /**
  * Fire reminders for all due medicines at the current minute.
