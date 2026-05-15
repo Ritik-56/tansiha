@@ -1,0 +1,6 @@
+# Ignore sensitive credentials
+Backend/serviceAccountKey.json
+# Local environment files
+*.env
+# Node modules
+node_modules/
